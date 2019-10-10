@@ -1,0 +1,389 @@
+--- a/hw/char/Makefile.objs
++++ b/hw/char/Makefile.objs
+@@ -7,6 +7,7 @@ common-obj-$(CONFIG_SERIAL) += serial.o
+ common-obj-$(CONFIG_SERIAL_ISA) += serial-isa.o
+ common-obj-$(CONFIG_SERIAL_PCI) += serial-pci.o
+ common-obj-$(CONFIG_VIRTIO_SERIAL) += virtio-console.o
++common-obj-$(CONFIG_VIRTIO_SERIAL) += virtio-cryptodev.o
+ common-obj-$(CONFIG_XILINX) += xilinx_uartlite.o
+ common-obj-$(CONFIG_XEN) += xen_console.o
+ common-obj-$(CONFIG_CADENCE) += cadence_uart.o
+--- /dev/null
++++ b/hw/char/virtio-cryptodev.c
+@@ -0,0 +1,147 @@
++/*
++ * Virtio Cryptodev Device
++ *
++ * Implementation of virtio-cryptodev qemu backend device.
++ *
++ * Dimitris Siakavaras <jimsiak@cslab.ece.ntua.gr>
++ * Stefanos Gerangelos <sgerag@cslab.ece.ntua.gr> 
++ * Konstantinos Papazafeiropoulos <kpapazaf@cslab.ece.ntua.gr>
++ *
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/iov.h"
++#include "hw/qdev.h"
++#include "hw/virtio/virtio.h"
++#include "standard-headers/linux/virtio_ids.h"
++#include "hw/virtio/virtio-cryptodev.h"
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <crypto/cryptodev.h>
++
++static uint64_t get_features(VirtIODevice *vdev, uint64_t features,
++                             Error **errp)
++{
++    DEBUG_IN();
++    return features;
++}
++
++static void get_config(VirtIODevice *vdev, uint8_t *config_data)
++{
++    DEBUG_IN();
++}
++
++static void set_config(VirtIODevice *vdev, const uint8_t *config_data)
++{
++    DEBUG_IN();
++}
++
++static void set_status(VirtIODevice *vdev, uint8_t status)
++{
++    DEBUG_IN();
++}
++
++static void vser_reset(VirtIODevice *vdev)
++{
++    DEBUG_IN();
++}
++
++static void vq_handle_output(VirtIODevice *vdev, VirtQueue *vq)
++{
++    VirtQueueElement *elem;
++    unsigned int *syscall_type;
++
++    DEBUG_IN();
++
++    elem = virtqueue_pop(vq, sizeof(VirtQueueElement));
++    if (!elem) {
++        DEBUG("No item to pop from VQ :(");
++        return;
++    } 
++
++    DEBUG("I have got an item from VQ :)");
++
++    syscall_type = elem->out_sg[0].iov_base;
++    switch (*syscall_type) {
++    case VIRTIO_CRYPTODEV_SYSCALL_TYPE_OPEN:
++        DEBUG("VIRTIO_CRYPTODEV_SYSCALL_TYPE_OPEN");
++        /* ?? */
++        break;
++
++    case VIRTIO_CRYPTODEV_SYSCALL_TYPE_CLOSE:
++        DEBUG("VIRTIO_CRYPTODEV_SYSCALL_TYPE_CLOSE");
++        /* ?? */
++        break;
++
++    case VIRTIO_CRYPTODEV_SYSCALL_TYPE_IOCTL:
++        DEBUG("VIRTIO_CRYPTODEV_SYSCALL_TYPE_IOCTL");
++        /* ?? */
++        unsigned char *output_msg = elem->out_sg[1].iov_base;
++        unsigned char *input_msg = elem->in_sg[0].iov_base;
++        memcpy(input_msg, "Host: Welcome to the virtio World!", 35);
++        printf("Guest says: %s\n", output_msg);
++        printf("We say: %s\n", input_msg);
++        break;
++
++    default:
++        DEBUG("Unknown syscall_type");
++        break;
++    }
++
++    virtqueue_push(vq, elem, 0);
++    virtio_notify(vdev, vq);
++    g_free(elem);
++}
++
++static void virtio_cryptodev_realize(DeviceState *dev, Error **errp)
++{
++    VirtIODevice *vdev = VIRTIO_DEVICE(dev);
++
++    DEBUG_IN();
++
++    virtio_init(vdev, "virtio-cryptodev", VIRTIO_ID_CRYPTODEV, 0);
++    virtio_add_queue(vdev, 128, vq_handle_output);
++}
++
++static void virtio_cryptodev_unrealize(DeviceState *dev, Error **errp)
++{
++    DEBUG_IN();
++}
++
++static Property virtio_cryptodev_properties[] = {
++    DEFINE_PROP_END_OF_LIST(),
++};
++
++static void virtio_cryptodev_class_init(ObjectClass *klass, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    VirtioDeviceClass *k = VIRTIO_DEVICE_CLASS(klass);
++
++    DEBUG_IN();
++    dc->props = virtio_cryptodev_properties;
++    set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
++
++    k->realize = virtio_cryptodev_realize;
++    k->unrealize = virtio_cryptodev_unrealize;
++    k->get_features = get_features;
++    k->get_config = get_config;
++    k->set_config = set_config;
++    k->set_status = set_status;
++    k->reset = vser_reset;
++}
++
++static const TypeInfo virtio_cryptodev_info = {
++    .name          = TYPE_VIRTIO_CRYPTODEV,
++    .parent        = TYPE_VIRTIO_DEVICE,
++    .instance_size = sizeof(VirtCryptodev),
++    .class_init    = virtio_cryptodev_class_init,
++};
++
++static void virtio_cryptodev_register_types(void)
++{
++    type_register_static(&virtio_cryptodev_info);
++}
++
++type_init(virtio_cryptodev_register_types)
+--- a/hw/virtio/virtio-pci.c
++++ b/hw/virtio/virtio-pci.c
+@@ -7,6 +7,9 @@
+  * Authors:
+  *  Anthony Liguori   <aliguori@us.ibm.com>
+  *  Paul Brook        <paul@codesourcery.com>
++ *  Dimitris Siakavaras <jimsiak@cslab.ece.ntua.gr>
++ *  Stefanos Gerangelos <sgerag@cslab.ece.ntua.gr>
++ *  Konstantinos Papazafeiropoulos <kpapazaf@cslab.ece.ntua.gr>
+  *
+  * This work is licensed under the terms of the GNU GPL, version 2.  See
+  * the COPYING file in the top-level directory.
+@@ -37,6 +40,8 @@
+ #include "hw/virtio/virtio-bus.h"
+ #include "qapi/visitor.h"
+ 
++#include "hw/virtio/virtio-cryptodev.h"
++
+ #define VIRTIO_PCI_REGION_SIZE(dev)     VIRTIO_PCI_CONFIG_OFF(msix_present(dev))
+ 
+ #undef VIRTIO_PCI_CONFIG
+@@ -2351,6 +2356,8 @@ static void virtio_serial_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
+     DeviceState *proxy = DEVICE(vpci_dev);
+     char *bus_name;
+ 
++    DEBUG_IN();
++
+     if (vpci_dev->class_code != PCI_CLASS_COMMUNICATION_OTHER &&
+         vpci_dev->class_code != PCI_CLASS_DISPLAY_OTHER && /* qemu 0.10 */
+         vpci_dev->class_code != PCI_CLASS_OTHERS) {        /* qemu-kvm  */
+@@ -2403,6 +2410,8 @@ static void virtio_serial_pci_instance_init(Object *obj)
+ {
+     VirtIOSerialPCI *dev = VIRTIO_SERIAL_PCI(obj);
+ 
++    DEBUG_IN();
++
+     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
+                                 TYPE_VIRTIO_SERIAL);
+ }
+@@ -2653,6 +2662,9 @@ static void virtio_pci_bus_new(VirtioBusState *bus, size_t bus_size,
+     DeviceState *qdev = DEVICE(dev);
+     char virtio_bus_name[] = "virtio-bus";
+ 
++    DEBUG_IN();
++    printf("  virtio_pci_bus_new(%s)\n", bus->parent_obj.name);
++
+     qbus_create_inplace(bus, bus_size, TYPE_VIRTIO_PCI_BUS, qdev,
+                         virtio_bus_name);
+ }
+@@ -2690,6 +2702,82 @@ static const TypeInfo virtio_pci_bus_info = {
+     .class_init    = virtio_pci_bus_class_init,
+ };
+ 
++/* virtio-cryptodev-pci */
++
++static void virtio_cryptodev_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
++{
++    VirtIOCryptodevPCI *dev = VIRTIO_CRYPTODEV_PCI(vpci_dev);
++    DeviceState *vdev = DEVICE(&dev->vdev);
++    DeviceState *proxy = DEVICE(vpci_dev);
++    char *bus_name;
++
++    DEBUG_IN();
++
++    if (vpci_dev->class_code != PCI_CLASS_COMMUNICATION_OTHER &&
++        vpci_dev->class_code != PCI_CLASS_DISPLAY_OTHER && /* qemu 0.10 */
++        vpci_dev->class_code != PCI_CLASS_OTHERS) {        /* qemu-kvm  */
++            vpci_dev->class_code = PCI_CLASS_COMMUNICATION_OTHER;
++    }
++
++//    /* backwards-compatibility with machines that were created with
++//       DEV_NVECTORS_UNSPECIFIED */
++//    if (vpci_dev->nvectors == DEV_NVECTORS_UNSPECIFIED) {
++//        vpci_dev->nvectors = dev->vdev.serial.max_virtserial_ports + 1;
++//    }
++
++    /*
++     * For command line compatibility, this sets the virtio-serial-device bus
++     * name as before.
++     */
++    if (proxy->id) {
++        bus_name = g_strdup_printf("%s.0", proxy->id);
++        virtio_device_set_child_bus_name(VIRTIO_DEVICE(vdev), bus_name);
++        g_free(bus_name);
++    }
++
++    qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
++    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
++}
++
++static Property virtio_cryptodev_pci_properties[] = {
++    DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
++                    VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, true),
++    DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors, 2),
++    DEFINE_PROP_UINT32("class", VirtIOPCIProxy, class_code, 0),
++    DEFINE_PROP_END_OF_LIST(),
++};
++
++static void virtio_cryptodev_pci_class_init(ObjectClass *klass, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    VirtioPCIClass *k = VIRTIO_PCI_CLASS(klass);
++    PCIDeviceClass *pcidev_k = PCI_DEVICE_CLASS(klass);
++
++    k->realize = virtio_cryptodev_pci_realize;
++    set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
++    dc->props = virtio_cryptodev_pci_properties;
++    pcidev_k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
++    pcidev_k->device_id = PCI_DEVICE_ID_VIRTIO_CRYPTODEV;
++    pcidev_k->revision = VIRTIO_PCI_ABI_VERSION;
++    pcidev_k->class_id = PCI_CLASS_COMMUNICATION_OTHER;
++}
++
++static void virtio_cryptodev_pci_instance_init(Object *obj)
++{
++    VirtIOCryptodevPCI *dev = VIRTIO_CRYPTODEV_PCI(obj);
++    DEBUG_IN();
++    object_initialize(&dev->vdev, sizeof(dev->vdev), "virtio-cryptodev");
++    object_property_add_child(obj, "virtio-backend", OBJECT(&dev->vdev), NULL);
++}
++
++static const TypeInfo virtio_cryptodev_pci_info = {
++    .name          = TYPE_VIRTIO_CRYPTODEV_PCI,
++    .parent        = TYPE_VIRTIO_PCI,
++    .instance_size = sizeof(VirtIOCryptodevPCI),
++    .instance_init = virtio_cryptodev_pci_instance_init,
++    .class_init    = virtio_cryptodev_pci_class_init,
++};
++
+ static void virtio_pci_register_types(void)
+ {
+     type_register_static(&virtio_rng_pci_info);
+@@ -2723,6 +2811,7 @@ static void virtio_pci_register_types(void)
+ #ifdef CONFIG_VHOST_VSOCK
+     type_register_static(&vhost_vsock_pci_info);
+ #endif
++    type_register_static(&virtio_cryptodev_pci_info);
+ }
+ 
+ type_init(virtio_pci_register_types)
+--- a/hw/virtio/virtio-pci.h
++++ b/hw/virtio/virtio-pci.h
+@@ -7,6 +7,9 @@
+  * Authors:
+  *  Anthony Liguori   <aliguori@us.ibm.com>
+  *  Paul Brook        <paul@codesourcery.com>
++ *  Dimitris Siakavaras <jimsiak@cslab.ece.ntua.gr>
++ *  Stefanos Gerangelos <sgerag@cslab.ece.ntua.gr>
++ *  Konstantinos Papazafeiropoulos <kpapazaf@cslab.ece.ntua.gr>
+  *
+  * This work is licensed under the terms of the GNU GPL, version 2.  See
+  * the COPYING file in the top-level directory.
+@@ -41,11 +44,14 @@
+ #include "hw/virtio/vhost-vsock.h"
+ #endif
+ 
++#include "hw/virtio/virtio-cryptodev.h"
++
+ typedef struct VirtIOPCIProxy VirtIOPCIProxy;
+ typedef struct VirtIOBlkPCI VirtIOBlkPCI;
+ typedef struct VirtIOSCSIPCI VirtIOSCSIPCI;
+ typedef struct VirtIOBalloonPCI VirtIOBalloonPCI;
+ typedef struct VirtIOSerialPCI VirtIOSerialPCI;
++typedef struct VirtIOCryptodevPCI VirtIOCryptodevPCI;
+ typedef struct VirtIONetPCI VirtIONetPCI;
+ typedef struct VHostSCSIPCI VHostSCSIPCI;
+ typedef struct VHostUserSCSIPCI VHostUserSCSIPCI;
+@@ -298,6 +304,18 @@ struct VirtIOSerialPCI {
+     VirtIOSerial vdev;
+ };
+ 
++/*
++ * virtio-cryptodev-pci: This extends VirtioPCIProxy.
++ */
++#define TYPE_VIRTIO_CRYPTODEV_PCI "virtio-cryptodev-pci"
++#define VIRTIO_CRYPTODEV_PCI(obj) \
++        OBJECT_CHECK(VirtIOCryptodevPCI, (obj), TYPE_VIRTIO_CRYPTODEV_PCI)
++
++struct VirtIOCryptodevPCI {
++    VirtIOPCIProxy parent_obj;
++    VirtCryptodev vdev;
++};
++
+ /*
+  * virtio-net-pci: This extends VirtioPCIProxy.
+  */
+--- a/include/hw/pci/pci.h
++++ b/include/hw/pci/pci.h
+@@ -85,6 +85,7 @@ extern bool pci_available;
+ #define PCI_DEVICE_ID_VIRTIO_RNG         0x1005
+ #define PCI_DEVICE_ID_VIRTIO_9P          0x1009
+ #define PCI_DEVICE_ID_VIRTIO_VSOCK       0x1012
++#define PCI_DEVICE_ID_VIRTIO_CRYPTODEV   0x1013
+ 
+ #define PCI_VENDOR_ID_REDHAT             0x1b36
+ #define PCI_DEVICE_ID_REDHAT_BRIDGE      0x0001
+--- /dev/null
++++ b/include/hw/virtio/virtio-cryptodev.h
+@@ -0,0 +1,21 @@
++#ifndef VIRTIO_CRYPTODEV_H
++#define VIRTIO_CRYPTODEV_H
++
++#define DEBUG(str) \
++    printf("[VIRTIO-CRYPTODEV] FILE[%s] LINE[%d] FUNC[%s] STR[%s]\n", \
++           __FILE__, __LINE__, __func__, str);
++#define DEBUG_IN() DEBUG("IN")
++
++#define VIRTIO_CRYPTODEV_SYSCALL_TYPE_OPEN  0
++#define VIRTIO_CRYPTODEV_SYSCALL_TYPE_CLOSE 1
++#define VIRTIO_CRYPTODEV_SYSCALL_TYPE_IOCTL 2
++
++#define TYPE_VIRTIO_CRYPTODEV "virtio-cryptodev"
++
++#define CRYPTODEV_FILENAME  "/dev/crypto"
++
++typedef struct VirtCryptodev {
++    VirtIODevice parent_obj;
++} VirtCryptodev;
++
++#endif /* VIRTIO_CRYPTODEV_H */
+--- a/include/standard-headers/linux/virtio_ids.h
++++ b/include/standard-headers/linux/virtio_ids.h
+@@ -43,5 +43,6 @@
+ #define VIRTIO_ID_INPUT        18 /* virtio input */
+ #define VIRTIO_ID_VSOCK        19 /* virtio vsock transport */
+ #define VIRTIO_ID_CRYPTO       20 /* virtio crypto */
++#define VIRTIO_ID_CRYPTODEV    30 /* virtio cryptodev */
+ 
+ #endif /* _LINUX_VIRTIO_IDS_H */
